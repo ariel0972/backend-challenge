@@ -2,6 +2,14 @@
 import { EntitySchema } from "@mikro-orm/core";
 import { WalletEntity } from "./wallet.entity";
 
+export interface WagerContext {
+    providerId: string;
+    externalTransactionId: string;
+    playerId: string;
+    roundId: string;
+    gameId: string;
+}
+
 export interface BetResult {
     transactionId: string;
     status: string;
@@ -23,6 +31,11 @@ export class TransactionEntity {
     idempotencyKey?: string;
     payloadHash?: string;
     response?: BetResult;
+    context?: WagerContext;
+    referenceExternalTransactionId?: string;
+    referenceId?: string;
+    attempts: number = 0;
+    nextAttemptAt?: Date;
 }
 
 
@@ -50,6 +63,21 @@ export const TransactionSchema = new EntitySchema<TransactionEntity>({
             fieldName: "payload_hash",
         },
         response: { type: "json", nullable: true },
+        context: { type: "json", nullable: true },
+        referenceExternalTransactionId: {
+            type: "string",
+            length: 200,
+            nullable: true,
+            fieldName: "reference_external_transaction_id",
+        },
+        referenceId: { type: "uuid", nullable: true, fieldName: "reference_id" },
+        attempts: { type: "integer", default: 0 },
+        nextAttemptAt: {
+            type: "Date",
+            columnType: "timestamptz",
+            nullable: true,
+            fieldName: "next_attempt_at",
+        },
     },
 
     uniques: [
