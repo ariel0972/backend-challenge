@@ -1,0 +1,14 @@
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: wagering
+      POSTGRES_USER: gamomania
+      POSTGRES_PASSWORD: g4m3m4n14
+    ports:
+      - "5000:5432"
+    volumes:
+      - dados_postgres:/var/lib/postgresql/data
+
+volumes:
+  dados_postgres:
