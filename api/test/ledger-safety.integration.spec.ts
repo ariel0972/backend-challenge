@@ -9,6 +9,7 @@ import { reconcileWallet } from "../src/application/reconcile-wallet";
 import { WalletEntity } from "../src/infrastructure/database/wallet.entity";
 import { TransactionEntity } from "../src/infrastructure/database/transaction.entity";
 import { LedgerEntryEntity } from "../src/infrastructure/database/ledgerEntry.entity";
+import { processWager } from "../src/application/process-wager";
 
 async function expectError(
   operation: () => Promise<unknown>,
@@ -72,7 +73,7 @@ test("banco impede alteração e exclusão de lançamentos", async () => {
   }
 }, 20_000);
 
-test("falha no ledger desfaz aposta e permite tentar novamente", async () => {
+test("falha desfaz saldo, ledger, transação, inbox e outbox; reentrega não duplica", async () => {
   const orm = await MikroORM.init(config);
 
   // Identificadores internos, gerados pelo teste, sem entrada externa.
@@ -96,6 +97,48 @@ test("falha no ledger desfaz aposta e permite tentar novamente", async () => {
       idempotencyKey: randomUUID(),
     };
 
+    const delivery = {
+      consumerName: "atomicity-test",
+      messageId: randomUUID(),
+    };
+
+    const execute = () =>
+      processWager(
+        orm,
+        { ...input, kind: "BET" },
+        false,
+        delivery,
+      );
+
+    async function messagingCounts() {
+      const em = orm.em.fork();
+
+      const inbox: { total: number }[] = await em.execute(
+        `select count(*)::int as total
+     from inbox_messages
+     where consumer_name = ? and message_id = ?`,
+        [delivery.consumerName, delivery.messageId],
+      );
+
+      const outbox: { total: number }[] = await em.execute(
+        `select count(*)::int as total
+     from outbox_events
+     where aggregate_id = ?`,
+        [wallet.id],
+      );
+
+      return {
+        inbox: inbox[0]!.total,
+        outbox: outbox[0]!.total,
+      };
+    }
+
+    // A abertura de 100 gera dois eventos.
+    expect(await messagingCounts()).toEqual({
+      inbox: 0,
+      outbox: 2,
+    });
+
     await connection.execute(`
       CREATE FUNCTION ${functionName}()
       RETURNS trigger
@@ -116,10 +159,13 @@ test("falha no ledger desfaz aposta e permite tentar novamente", async () => {
         EXECUTE FUNCTION ${functionName}();
       `);
 
-      await expectError(
-        () => placeBet(orm, input),
-        "TEST_LEDGER_FAILURE",
-      );
+      await expectError(execute, "TEST_LEDGER_FAILURE");
+
+      // A tentativa falhou: não pode deixar inbox nem eventos da aposta.
+      expect(await messagingCounts()).toEqual({
+        inbox: 0,
+        outbox: 2,
+      });
 
       const em = orm.em.fork();
 
@@ -154,7 +200,36 @@ test("falha no ledger desfaz aposta e permite tentar novamente", async () => {
     }
 
     // Sem a falha artificial, a mesma chave pode ser processada.
-    const result = await placeBet(orm, input);
+    const result = await execute();
+
+    // Agora a aposta confirmou: uma inbox e dois novos eventos.
+    expect(await messagingCounts()).toEqual({
+      inbox: 1,
+      outbox: 4,
+    });
+
+    // Reentrega da mesma mensagem deve reutilizar a resposta.
+    const replayed = await execute();
+
+    expect(replayed).toEqual(result);
+
+    expect(await messagingCounts()).toEqual({
+      inbox: 1,
+      outbox: 4,
+    });
+
+    const saved = await orm.em.fork().findOneOrFail(
+      WalletEntity,
+      { id: wallet.id },
+    );
+
+    expect(saved.balance).toBe("20.00");
+    expect(saved.version).toBe(2);
+
+    expect(await orm.em.fork().count(LedgerEntryEntity, {
+      walletId: wallet.id,
+      direction: "DEBIT",
+    })).toBe(1);
 
     expect(result.status).toBe("PROCESSED");
     expect(result.balance.amount).toBe("20.00");
