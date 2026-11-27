@@ -15,6 +15,11 @@ import {
   type BetResult,
   type WagerContext,
 } from "../infrastructure/database/transaction.entity";
+import {
+  InboxSession,
+  enqueueOutcome,
+  type Delivery,
+} from "../infrastructure/messaging/transactional-messaging";
 
 export type WagerKind = "BET" | "WIN" | "LOSS" | "REFUND" | "ROLLBACK";
 
@@ -42,6 +47,7 @@ export async function processWager(
   orm: MikroORM,
   input: WagerInput,
   resumePending = false,
+  delivery?: Delivery,
 ): Promise<BetResult> {
   if (
     typeof input.idempotencyKey !== "string" ||
@@ -101,8 +107,18 @@ export async function processWager(
     .update(JSON.stringify(canonical))
     .digest("hex");
 
+  const deliveryHash = createHash("sha256")
+    .update(JSON.stringify([input.idempotencyKey, hash]))
+    .digest("hex");
+
   try {
     return await orm.em.fork().transactional(async (em) => {
+      const inbox = await InboxSession.open(em, delivery, deliveryHash);
+
+      if (inbox.previous) {
+        return inbox.previous;
+      }
+
       const entity = await em.findOneOrFail(
         WalletEntity,
         { id: input.walletId },
@@ -117,18 +133,19 @@ export async function processWager(
         const previous = replay(existing, hash);
 
         if (!resumePending || existing.status !== "PENDING_REFERENCE") {
-          return previous;
+          return inbox.complete(previous);
         }
 
         if (
           existing.nextAttemptAt &&
           existing.nextAttemptAt.getTime() > Date.now()
         ) {
-          return previous;
+          return inbox.complete(previous);
         }
       }
 
       const wallet = WalletMapper.toDomain(entity);
+      const balanceBefore = wallet.balance.toJSON();
       const tx = existing ?? new TransactionEntity();
 
       if (!existing) {
@@ -150,6 +167,7 @@ export async function processWager(
         status: string,
         code: string | null,
       ): Promise<BetResult> => {
+        const previousStatus = tx.status;
         tx.status = status;
 
         if (status !== "PENDING_REFERENCE") {
@@ -166,7 +184,22 @@ export async function processWager(
         tx.response = response;
         em.persist(tx);
         await em.flush();
-        return response;
+
+        await enqueueOutcome(em, {
+          transactionId: tx.id,
+          walletId: wallet.id,
+          kind: tx.type,
+          status,
+          previousStatus,
+          rejectionCode: code,
+          before: balanceBefore,
+          after: response.balance,
+          walletVersion: wallet.version,
+          correlationId: input.idempotencyKey,
+          causationId: delivery?.messageId,
+        });
+
+        return inbox.complete(response);
       };
 
       if (
@@ -224,7 +257,7 @@ export async function processWager(
           reference.walletId.id !== wallet.id ||
           reference.currency !== wallet.currency ||
           reference.context?.playerId.toLowerCase() !==
-            input.context.playerId.toLowerCase() ||
+          input.context.playerId.toLowerCase() ||
           reference.context?.roundId !== input.context.roundId
         ) {
           return finish("REJECTED", "REFERENCE_MISMATCH");
@@ -332,6 +365,12 @@ export async function processWager(
       return result;
     }, { isolationLevel: IsolationLevel.READ_COMMITTED });
   } catch (error) {
+    // Uma entrega SQS só é confirmada quando a inbox também foi persistida.
+    // Em caso de corrida/rollback, a fila fará uma nova tentativa.
+    if (delivery) {
+      throw error;
+    }
+    
     if (!(error instanceof UniqueConstraintViolationException)) {
       throw error;
     }

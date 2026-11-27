@@ -1,3 +1,13 @@
+## Minha implementação
+
+- [Como executar e testar](RUNNING.md)
+- [Arquitetura, decisões e limitações](ARCHITECTURE.md)
+
+A implementação está em `api/`.
+O enunciado original foi preservado abaixo.
+
+---
+
 # Technical Challenge — Distributed Wagering Processor
 
 ## Bem-vindo à Jungle Gaming 🦧

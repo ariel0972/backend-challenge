@@ -9,6 +9,24 @@ services:
       - "5000:5432"
     volumes:
       - dados_postgres:/var/lib/postgresql/data
+    
+  localstack:
+    image: localstack/localstack:4.14.0
+    ports:
+      - "4566:4566"
+    environment:
+      SERVICES: sqs
+      AWS_DEFAULT_REGION: us-east-1
+      SQS_ENDPOINT_STRATEGY: path
+    healthcheck:
+      test:
+        - CMD
+        - awslocal
+        - sqs
+        - list-queues
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
 volumes:
   dados_postgres:

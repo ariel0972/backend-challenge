@@ -14,6 +14,9 @@ export default defineConfig({
 
   entities: [WalletSchema, TransactionSchema, LedgerEntrySchema],
   extensions: [Migrator],
+  schemaGenerator: {
+    skipTables: ["inbox_messages", "outbox_events"],
+  },
 
   migrations: {
     path: "./dist/infrastructure/database/migrations",

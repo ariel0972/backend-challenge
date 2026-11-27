@@ -4,7 +4,7 @@ import {
   Injectable,
   Logger,
   type OnApplicationBootstrap,
-  type OnApplicationShutdown,
+  type OnModuleDestroy,
 } from "@nestjs/common";
 import { MikroORM } from "@mikro-orm/postgresql";
 import { TransactionEntity } from "../infrastructure/database/transaction.entity";
@@ -42,7 +42,7 @@ export async function retryPendingReferences(orm: MikroORM) {
 
 @Injectable()
 export class ReferenceWorker
-implements OnApplicationBootstrap, OnApplicationShutdown {
+  implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly logger = new Logger(ReferenceWorker.name);
   private timer?: ReturnType<typeof setInterval>;
   private running?: Promise<void>;
@@ -51,7 +51,7 @@ implements OnApplicationBootstrap, OnApplicationShutdown {
   constructor(
     @Inject(MikroORM)
     private readonly orm: MikroORM,
-  ) {}
+  ) { }
 
   onApplicationBootstrap() {
     this.timer = setInterval(() => {
@@ -70,7 +70,7 @@ implements OnApplicationBootstrap, OnApplicationShutdown {
     }, 1000);
   }
 
-  async onApplicationShutdown() {
+  async onModuleDestroy() {
     this.stopping = true;
     if (this.timer) clearInterval(this.timer);
     await this.running;

@@ -6,6 +6,7 @@ import { Wallet } from "../domain/wallet";
 import { WalletMapper } from "../infrastructure/database/wallet.mapper";
 import { TransactionEntity } from "../infrastructure/database/transaction.entity";
 import { LedgerEntryEntity } from "../infrastructure/database/ledgerEntry.entity";
+import { enqueueOutcome } from "../infrastructure/messaging/transactional-messaging";
 
 interface OpenWalletInput {
   playerId: string;
@@ -13,7 +14,7 @@ interface OpenWalletInput {
   currency: string;
 }
 
-export async function openWallet( orm: MikroORM, input: OpenWalletInput ): Promise<Wallet> {
+export async function openWallet(orm: MikroORM, input: OpenWalletInput): Promise<Wallet> {
   const initialBalance = Money.from({
     amount: input.amount,
     currency: input.currency,
@@ -58,6 +59,19 @@ export async function openWallet( orm: MikroORM, input: OpenWalletInput ): Promi
 
     em.persist(entry);
     await em.flush();
+
+    await enqueueOutcome(em, {
+      transactionId: transaction.id,
+      walletId: wallet.id,
+      kind: "OPENING",
+      status: "PROCESSED",
+      previousStatus: "PENDING",
+      rejectionCode: null,
+      before: Money.zero(wallet.currency).toJSON(),
+      after: wallet.balance.toJSON(),
+      walletVersion: wallet.version,
+      correlationId: transaction.id,
+    });
   });
 
   return wallet;

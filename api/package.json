@@ -20,6 +20,7 @@
     "test:e2e": "jest --config ./test/jest-e2e.json"
   },
   "dependencies": {
+    "@aws-sdk/client-sqs": "^3.1178.0",
     "@mikro-orm/core": "^7.2.12",
     "@mikro-orm/migrations": "^7.2.12",
     "@mikro-orm/postgresql": "^7.2.12",
