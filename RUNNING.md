@@ -85,3 +85,5 @@ ao corpo principal, ao lado de kind e money.
 ## Limitações
 
 Consulte ARCHITECTURE.md.
+
+bun --env-file=.env test ./test/bet.integration.spec.ts ./test/reconciliation.integration.spec.ts ./test/ledger-safety.integration.spec.ts ./test/operations.integration.spec.ts

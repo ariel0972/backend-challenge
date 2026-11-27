@@ -48,7 +48,9 @@ export async function processWager(
   input: WagerInput,
   resumePending = false,
   delivery?: Delivery,
+  execution?: { idempotentReplay: boolean },
 ): Promise<BetResult> {
+  if (execution) execution.idempotentReplay = false;
   if (
     typeof input.idempotencyKey !== "string" ||
     !input.idempotencyKey.trim() ||
@@ -116,6 +118,7 @@ export async function processWager(
       const inbox = await InboxSession.open(em, delivery, deliveryHash);
 
       if (inbox.previous) {
+        if (execution) execution.idempotentReplay = true;
         return inbox.previous;
       }
 
@@ -133,6 +136,7 @@ export async function processWager(
         const previous = replay(existing, hash);
 
         if (!resumePending || existing.status !== "PENDING_REFERENCE") {
+          if (execution) execution.idempotentReplay = true;
           return inbox.complete(previous);
         }
 
@@ -140,6 +144,7 @@ export async function processWager(
           existing.nextAttemptAt &&
           existing.nextAttemptAt.getTime() > Date.now()
         ) {
+          if (execution) execution.idempotentReplay = true;
           return inbox.complete(previous);
         }
       }
@@ -370,7 +375,7 @@ export async function processWager(
     if (delivery) {
       throw error;
     }
-    
+
     if (!(error instanceof UniqueConstraintViolationException)) {
       throw error;
     }
@@ -380,7 +385,9 @@ export async function processWager(
     });
 
     if (existing) {
-      return replay(existing, hash);
+      const result = replay(existing, hash);
+      if (execution) execution.idempotentReplay = true;
+      return result;
     }
 
     // Inclui reutilização de providerId + externalTransactionId

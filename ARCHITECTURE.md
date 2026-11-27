@@ -120,13 +120,20 @@ e publicação de eventos da outbox.
 
 Pendências conhecidas:
 - testes automatizados de crash real e recuperação;
-- teste com pelo menos três processos concorrentes;
 - testes específicos de publishers concorrentes e retry/DLQ;
 - métricas completas exigidas pelo desafio;
-- indicador explícito idempotentReplay na resposta HTTP;
 - maior encapsulamento das transições de transação e mensageria;
 - containerização da aplicação: o Compose atual sobe as dependências;
 - revisão final de lint e tipagem dos scripts auxiliares.
 
 O LocalStack é usado para desenvolvimento. A durabilidade das filas
 após recriação do emulador não foi validada.
+
+Foi executado um smoke com três processos Bun independentes,
+sincronizados antes do disparo de 50 chamadas com a mesma chave.
+O teste verificou uma única transação, um único débito, saldo 90.00,
+versão 2 e reconciliação consistente.
+
+Esse teste usa diretamente o caso de uso com PostgreSQL real.
+Não substitui os testes de crash, múltiplos consumidores SQS
+ou publishers concorrentes.
